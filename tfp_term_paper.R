@@ -271,5 +271,30 @@ ggplot(less_k_intensive, aes(x = year, y = efficiency, group = industry, color =
 
 
 
+#Structural Break Test for Efficiencies in Stochastic Frontier Analysis
+
+#Labour Intensive
+food_eff <- less_k_intensive%>%dplyr::filter(industry==3)
+textile_eff <- less_k_intensive%>%dplyr::filter(industry==4)
+wood_eff <- less_k_intensive%>%dplyr::filter(industry==5)
+rubber_eff <- less_k_intensive%>%dplyr::filter(industry==9)
+nonmetal_eff <- less_k_intensive%>%dplyr::filter(industry==10)
+recycling_eff <- less_k_intensive%>%dplyr::filter(industry==15)
+
+#Capital Intensive
+paper_eff <- more_k_intensive%>%dplyr::filter(industry==6)
+fuel_eff <- more_k_intensive%>%dplyr::filter(industry==7)
+chem_eff <- more_k_intensive%>%dplyr::filter(industry==8)
+metals_eff <- more_k_intensive%>%dplyr::filter(industry==11)
+mach_eff <- more_k_intensive%>%dplyr::filter(industry==12)
+eleceq_eff <- more_k_intensive%>%dplyr::filter(industry==13)
+transp_eff <- more_k_intensive%>%dplyr::filter(industry==14)
+power_eff <- more_k_intensive%>%dplyr::filter(industry==16)
+
+
+#OLS-MOSUM Test (One Case Shown Here, Done for all Sub-Industries)
+
+plot(efp(ts(power_eff$efficiency) ~ power_eff$t, type = "OLS-MOSUM"))
+sctest(ts(power_eff$efficiency) ~ power_eff$t, type = "OLS-MOSUM")
 
 
