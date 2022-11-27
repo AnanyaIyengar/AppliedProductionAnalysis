@@ -16,11 +16,13 @@ library(deaR) #for data-envelopment analysis
 library(AER)
 library(car)
 library(lmtest)
+library(viridis)
 library(panelr) #for panel data
 library(skimr) #for tables
 library(strucchange) #for structural change 
 library(tseries) #for time series 
 library(frontier) #for stochastic frontier analysis
+
 
 #Importing Data 
 
@@ -55,7 +57,7 @@ klems$t <- as.numeric(klems$t)
 
 manufacturing <- klems%>%dplyr::filter(industry < 17, industry>2)
 manufacturing <- panel_data(manufacturing, wave = t, id = industry)
-
+manufacturing
 #Describing Variables
 # - gross_output_cp : Gross Output 2011-12 Constant Prices in Crores of Rupees
 # - va_cp : Value Added 2011-12 Constant Prices in Crores of Rupees
@@ -128,6 +130,21 @@ datasummary_skim(recycling, output = "latex")
 elecgaswater <- manufacturing%>%dplyr::filter(industry == 16)
 datasummary_skim(elecgaswater, output = "latex")
 
+# Exploratory Data Visualisation
+
+ktitles <- as_labeller(c("11" = "Metals", "12" = "Machinery", "13" = "Electrical Equipment", "14" = "Transport Equipment", "16" = "Electricity, Gas, Water", "6" = "Paper", "7" = "Coke, Petrol, Nuclear", "8" = "Chemicals"))
+ltitles <- as_labeller(c("10" = "Non-Metallic Minerals", "15" = "Recycling", "3" = "Food", "4" = "Textiles & Leather", "5" = "Wood", "9" = "Rubber/Plastic"))
+
+ggplot(data = more_k_intensive, aes(x = year)) + geom_line(aes(y = gross_output_cp), color = "black") +  facet_wrap(~ industry, labeller = ktitles) + xlab("Year") + ylab("Gross Output") + labs(caption = "Data: KLEMS")
+
+ggplot(data = less_k_intensive, aes(x = year)) + geom_line(aes(y = gross_output_cp), color = "black") +  facet_wrap(~ industry, labeller = ltitles) + xlab("Year") + ylab("Gross Output") + labs(caption = "Data: KLEMS")
+
+ggplot(data = more_k_intensive, aes(x = year)) + geom_line(aes(y = logklratio), color = "black") +  facet_wrap(~ industry, labeller = ktitles) + xlab("Year") + ylab("Log K/L") + labs(caption = "Data: KLEMS")
+
+ggplot(data = less_k_intensive, aes(x = year)) + geom_line(aes(y = logklratio), color = "black") +  facet_wrap(~ industry, labeller = ltitles) + xlab("Year") + ylab("Log K/L") + labs(caption = "Data: KLEMS")
+
+
+
 #We use each sub-industry as a DMU while calculating the Malmquist Indices
 
 more_k_intensive$industry <- as.character(more_k_intensive$industry)
@@ -144,6 +161,7 @@ k_int_dea <- read_malmquist(selected_more_k_intensive, percol = 2, arrangement =
 selected_less_k_intensive <- less_k_intensive%>%dplyr::select(industry, year, gross_output_cp, energy_cp, material_cp, number_employed, capital_stock_cp, services_cp)
 
 l_int_dea <- read_malmquist(selected_less_k_intensive, percol = 2, arrangement = "vertical", outputs = 3, inputs = 4:8)
+
 
 
 #Evaluating the Malmquist Index for Capital Intensive Manufacturing according to Fare et al. (1994)
@@ -223,51 +241,119 @@ plot(efp(ts(capital_intensive_malmquist$output_malm_12) ~ capital_intensive_malm
 sctest(ts(capital_intensive_malmquist$output_malm_12) ~ capital_intensive_malmquist$t, type = "OLS-MOSUM")
 
 
-###STOCHASTIC FROONTIER ANALYSIS FOR PANEL DATA: ERROR COMPONENTS FRONTIER (BATTESE & COELLI, 1992)###
+###STOCHASTIC FRONTIER ANALYSIS FOR PANEL DATA: ERROR COMPONENTS FRONTIER (BATTESE & COELLI, 1992)###
 
-#Cobb Douglas Specification for Production Frontier with Sub-Industry Level Fixed Effects
+#Creating squared time variables
+
+more_k_intensive$tsq <- (more_k_intensive$t)^2
+less_k_intensive$tsq <- (less_k_intensive$t)^2
 
 #Capital Intensive Industry (Without Time Variant Efficiency)
 
-capital_cd_no_time_effects <- sfa(log(gross_output_cp) ~ log(capital_stock_cp) + log(lab_quality) + log(energy_cp) + log(material_cp) + log(services_cp), data = more_k_intensive, truncNorm = FALSE, ineffDecrease = TRUE, timeEffect = FALSE)
-summary(capital_cd_no_time_effects)
-summary(efficiencies(capital_cd_no_time_effects))
-sigmaUsq_cd_capital <- coefficients(capital_cd_no_time_effects)[7]*coefficients(capital_cd_no_time_effects)[8]
-sigmaVsq_cd_capital <- coefficients(capital_cd_no_time_effects)[7] - sigmaUsq_cd_capital
-sigmaVsq_cd_capital
-sigmaUsq_cd_capital
+#Cobb Douglas Specification
+
+capital_cobb_douglas <- sfa(log(va_cp) ~ log(capital_stock_cp) + log(number_employed) + factor(industry) + t, data = more_k_intensive, truncNorm = FALSE, ineffDecrease = TRUE)
+summary(capital_cobb_douglas)
+sigmaU_cd_capital <- coefficients(capital_cobb_douglas)[12]*coefficients(capital_cobb_douglas)[13]
+sigmaV_cd_capital <- coefficients(capital_cobb_douglas)[12] - sigmaU_cd_capital
+sigmaU_cd_capital
+sigmaV_cd_capital
+
+#Translog Specification
+
+capital_translog <- sfa(log(va_cp) ~ log(capital_stock_cp) + log(number_employed) + 0.5*I(log(capital_stock_cp))*I(log(number_employed)) + factor(industry) + t + 0.5*tsq + I(log(capital_stock_cp))*t + I(log(number_employed))*t, data = more_k_intensive, truncNorm = FALSE, ineffDecrease = TRUE)
+summary(capital_translog)
+sigmaU_translog_capital <- coefficients(capital_translog)[16]*coefficients(capital_translog)[17]
+sigmaV_translog_capital <- coefficients(capital_translog)[16] - sigmaU_translog_capital
+sigmaU_translog_capital
+sigmaV_translog_capital
+
+cor(more_k_intensive$number_employed, more_k_intensive$capital_stock_cp) #0.32
 
 #Labour Intensive Industry (Without Time Variant Efficiency)
 
-labour_cd_no_time_effects <- sfa(log(gross_output_cp) ~ log(capital_stock_cp) + log(number_employed) + log(energy_cp) + log(material_cp) + log(services_cp), data = less_k_intensive, truncNorm = FALSE, ineffDecrease = TRUE, timeEffect = FALSE)
-summary(labour_cd_no_time_effects)
-summary(efficiencies(labour_cd_no_time_effects))
-sigma_Usq_cd_labour <- coefficients(labour_cd_no_time_effects)[7]*coefficients(labour_cd_no_time_effects)[8]
-sigmaVsq_cd_labour <- coefficients(labour_cd_no_time_effects)[7] - sigma_Usq_cd_labour
-sigma_Usq_cd_labour
-sigmaVsq_cd_labour
+#Cobb Douglas Specification
 
+labour_cobb_douglas <- sfa(log(va_cp) ~ log(capital_stock_cp) + log(number_employed) + factor(industry) + t, data = less_k_intensive, truncNorm = FALSE, ineffDecrease = TRUE)
+summary(labour_cobb_douglas)
+sigmaU_cd_labour <- coefficients(labour_cobb_douglas)[10]*coefficients(labour_cobb_douglas)[11]
+sigmaV_cd_labour <- coefficients(labour_cobb_douglas)[10] - sigmaU_cd_labour
+sigmaU_cd_labour
+sigmaV_cd_labour
 
-#Translog Specification: Identification not possible because of near perfect multicollinearity 
+#Translog Specification
+
+labour_translog <- sfa(log(va_cp) ~ I(log(capital_stock_cp)) + I(log(number_employed)) + 0.5*I(log(capital_stock_cp))*I(log(number_employed)) + factor(industry) + t + 0.5*tsq + t*I(log(capital_stock_cp)) + t*I(log(number_employed)), data = less_k_intensive, truncNorm = FALSE, ineffDecrease = TRUE)
+summary(labour_translog)
+sigmaU_translog_labour <- coefficients(labour_translog)[14]*coefficients(labour_translog)[15]
+sigmaV_translog_labour <- coefficients(labour_translog)[14] - sigmaU_translog_labour
+sigmaU_translog_labour
+sigmaV_translog_labour
 
 #Likelihood Ratio Test for Inefficiency
 
-lrtest(capital_cd_no_time_effects)
-lrtest(labour_cd_no_time_effects)
+lrtest(capital_cobb_douglas)
+lrtest(capital_translog)
+lrtest(labour_cobb_douglas)
+lrtest(labour_translog)
+
 
 #Comparing Efficiency Across Sub-Industries
 
-eff_cap <- efficiencies(capital_cd_no_time_effects)
-eff_lab <- efficiencies(labour_cd_no_time_effects)
+eff_cap_cd <- efficiencies(capital_cobb_douglas)
+eff_lab_cd <- efficiencies(labour_cobb_douglas)
+eff_cap_translog <- efficiencies(capital_translog)
+eff_lab_translog <- efficiencies(labour_translog)
 
-more_k_intensive$efficiency <- eff_cap
-less_k_intensive$efficiency <- eff_lab
+more_k_intensive$efficiencycobbdouglas <- eff_cap_cd
+more_k_intensive$efficiencytranslog <- eff_cap_translog
+less_k_intensive$efficiencycobbdouglas <- eff_lab_cd
+less_k_intensive$efficiencytranslog <- eff_lab_translog
+
+#Calculating Scale Elasticity as Sum of Output Elasticities
+
+#Cobb Douglas: Just the Sum of Coefficients!
+
+rts_capital_cobbdouglas <- 0.1345852 + 0.5991470
+rts_labour_cobbdouglas <- 0.38136 + 0.50528
+
+print(rts_capital_cobbdouglas)
+print(rts_labour_cobbdouglas)
+
+#Translog: 
+
+#For capital intensive industry: 0.12488 + 0.5*0.0157*ln(number_employed) + (-0.00192)*t + 0.31 + 0.5*0.0157*ln(capital_stock_cp) + 0.0017*t
+
+average_aggregate_scale_capital <- 0
+
+for (t in 1:40) {
+  average_aggregate_scale_capital[t] = 0.12488 + 0.5*0.0157*(mean(log(more_k_intensive$capital_stock_cp)) + mean(log(more_k_intensive$number_employed))) + 0.31 + (0.0017-0.00192)*t
+}
+
+print(average_aggregate_scale_capital)
+exp(mean(log(average_aggregate_scale_capital)))
+
+#For labour intensive industry: 0.05086 + 0.5*(-0.00823)(ln(capital_stock_cp) + ln(number_employed)) + 0.02366*t + (-0.0139)*t
+
+average_aggregate_scale_labour <- 0
+
+for (t in 1:40) {
+  average_aggregate_scale_labour[t] = 0.05086 + 0.5*(-0.00823)*(mean(log(less_k_intensive$capital_stock_cp)) + mean(log(less_k_intensive$number_employed))) + (0.02366-0.0139)*t
+}
+
+print(average_aggregate_scale_labour)
+mean(average_aggregate_scale_labour)
+
+#Visualising Technical Efficiency with Line and Area Graphs 
+
+ggplot(more_k_intensive, aes(x = year, y = efficiencytranslog, group = industry, fill = industry)) + geom_area(colour = "white", size = 0.5, alpha = 0.6) + ylab("Efficiency") + xlab("Years") + ggtitle("SFA Efficiency Measures for Capital Intensive Industry: Translog") + labs(caption = "Source: Author's Calculations and KLEMS India") + scale_fill_viridis(labels = c("Metals", "Machinery", "Electrical Equipment", "Transport Equipment", "Electricity, Gas, Water", "Paper", "Coke, Petrol, Fuel", "Chemicals"), discrete = T)                                                      
+
+ggplot(more_k_intensive, aes(x = year, y = efficiencycobbdouglas, group = industry, fill = industry)) + geom_area(colour = "white", size = 0.5, alpha = 0.6) + ylab("Efficiency") + xlab("Years") + ggtitle("SFA Efficiency Measures for Capital Intensive Industry: Cobb Douglas") + labs(caption = "Source: Author's Calculations and KLEMS India") + scale_fill_viridis(labels = c("Metals", "Machinery", "Electrical Equipment", "Transport Equipment", "Electricity, Gas, Water", "Paper", "Coke, Petrol, Fuel", "Chemicals"), discrete = T)                                                       
+
+ggplot(less_k_intensive, aes(x = year, y = efficiencycobbdouglas, group = industry, color = industry)) + geom_line(size = 2, alpha = 0.6) + ylab("Efficiency") + xlab("Years") + ggtitle("SFA Efficiency Measures for Labour Intensive Industry: Cobb Douglas") + labs(caption = "Source: Author's Calculations and KLEMS India") + scale_color_viridis(labels = c("Non-Metallic Minerals", "Recycling", "Food, Beverages, Tobacco", "Textiles, Leather, Footwear", "Wood & Wood Products", "Rubber and Plastic"), discrete = T)                                                      
 
 
-ggplot(more_k_intensive, aes(x = year, y = efficiency, group = industry, color = industry)) + stat_summary(geom = "line", fun = "mean") + ylab("Efficiency") + xlab("Years") + ggtitle("SFA Efficiency Measures for Capital Intensive Industry") + labs(caption = "Source: Author's Calculations and KLEMS India") + scale_color_discrete(labels = c("Metals", "Machinery", "Electrical Equipment", "Transport Equipment", "Electricity, Gas, Water", "Paper", "Coke, Petrol, Fuel", "Chemicals"))                                                      
-
-ggplot(less_k_intensive, aes(x = year, y = efficiency, group = industry, color = industry)) + stat_summary(geom = "line", fun = "mean") + ylab("Efficiency") + xlab("Years") + ggtitle("SFA Efficiency Measures for Labour Intensive Industry") + labs(caption = "Source: Author's Calculations and KLEMS India") + scale_color_discrete(labels = c("Non-Metallic Minerals", "Recycling", "Food, Beverages, Tobacco", "Textiles, Leather, Footwear", "Wood & Wood Products", "Rubber and Plastic"))                                                      
-
+ggplot(less_k_intensive, aes(x = year, y = efficiencytranslog, group = industry, color = industry)) + geom_line(size = 2, alpha = 0.6) + ylab("Efficiency") + xlab("Years") + ggtitle("SFA Efficiency Measures for Labour Intensive Industry: Translog") + labs(caption = "Source: Author's Calculations and KLEMS India") + scale_color_viridis(labels = c("Non-Metallic Minerals", "Recycling", "Food, Beverages, Tobacco", "Textiles, Leather, Footwear", "Wood & Wood Products", "Rubber and Plastic"), discrete = T)                                                      
 
 
 
@@ -292,9 +378,14 @@ transp_eff <- more_k_intensive%>%dplyr::filter(industry==14)
 power_eff <- more_k_intensive%>%dplyr::filter(industry==16)
 
 
-#OLS-MOSUM Test (One Case Shown Here, Done for all Sub-Industries)
+#OLS-MOSUM Test (One Case Shown Here)
 
-plot(efp(ts(power_eff$efficiency) ~ power_eff$t, type = "OLS-MOSUM"))
-sctest(ts(power_eff$efficiency) ~ power_eff$t, type = "OLS-MOSUM")
+plot(efp(ts(power_eff$efficiencycobbdouglas) ~ power_eff$t, type = "OLS-MOSUM"))
+sctest(ts(power_eff$efficiencycobbdouglas) ~ power_eff$t, type = "OLS-MOSUM")
+
+
+
+
+
 
 
